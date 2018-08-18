@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>three.js webgl - node material</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<style>
+			body {
+				color: #fff;
+				font-family:Monospace;
+				font-size:13px;
+				margin: 0px;
+				text-align:center;
+				overflow: hidden;
+			}
+
+			a { color: white }
+		</style>
+	</head>
+	<body>
+
+		<div id="container"></div>
+
+		<script src="https://rawgit.com/mrdoob/three.js/dev/build/three.js"></script>
+		<script src='https://rawgit.com/mrdoob/three.js/dev/examples/js/geometries/TeapotBufferGeometry.js'></script>
+		<script src="https://rawgit.com/mrdoob/three.js/dev/examples/js/controls/OrbitControls.js"></script>
+		<script src="https://rawgit.com/mrdoob/three.js/dev/examples/js/libs/dat.gui.min.js"></script>
+		<script src="https://rawgit.com/mrdoob/three.js/dev/examples/js/objects/Reflector.js"></script>
+		<script src="https://rawgit.com/mrdoob/three.js/dev/examples/js/objects/ReflectorRTT.js"></script>
+
+		<script type="module">
+
+			import 'https://rawgit.com/mrdoob/three.js/dev/examples/js/nodes/THREE.Nodes.js';
+			import 'https://rawgit.com/mrdoob/three.js/dev/examples/js/loaders/NodeMaterialLoader.js';
+
+			var WIDTH = window.innerWidth;
+			var HEIGHT = window.innerHeight;
+
+			var container = document.getElementById( 'container' );
+
+			var renderer, scene, camera, clock = new THREE.Clock(), fov = 50;
+			var frame = new THREE.NodeFrame();
+			var teapot, mesh;
+			var controls;
+			var rtTexture, rtMaterial;
+			var gui;
+			var textures = {
+				grassNormal: { url: 'https://rawgit.com/mrdoob/three.js/dev/examples/textures/terrain/grasslight-big-nm.jpg' },
+				decalDiffuse: { url: 'https://rawgit.com/mrdoob/three.js/dev/examples/textures/decal/decal-diffuse.png' },
+			};
+
+			var param = { example: new URL( window.location.href ).searchParams.get( 'e' ) || 'standard' };
+
+			function getTexture( name ) {
+
+				var texture = textures[ name ].texture;
+
+				if ( ! texture ) {
+
+					texture = textures[ name ].texture = new THREE.TextureLoader().load( textures[ name ].url );
+					texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+
+				}
+
+				return texture;
+
+			}
+
+			var cubemap = function () {
+
+				var path = "https://rawgit.com/mrdoob/three.js/dev/examples/textures/cube/Park2/";
+				var format = '.jpg';
+				var urls = [
+					path + 'posx' + format, path + 'negx' + format,
+					path + 'posy' + format, path + 'negy' + format,
+					path + 'posz' + format, path + 'negz' + format
+				];
+
+				var textureCube = new THREE.CubeTextureLoader().load( urls );
+				textureCube.format = THREE.RGBFormat;
+
+				return textureCube;
+
+			}();
+
+			window.addEventListener( 'load', init );
+
+			function init() {
+
+				renderer = new THREE.WebGLRenderer( { antialias: true } );
+				renderer.setPixelRatio( window.devicePixelRatio );
+				renderer.setSize( window.innerWidth, window.innerHeight );
+				renderer.uuid = THREE.Math.generateUUID();
+				container.appendChild( renderer.domElement );
+
+				scene = new THREE.Scene();
+
+				camera = new THREE.PerspectiveCamera( fov, window.innerWidth / window.innerHeight, 1, 1000 );
+				camera.position.x = 50;
+				camera.position.z = - 50;
+				camera.position.y = 30;
+				camera.target = new THREE.Vector3();
+
+
+				controls = new THREE.OrbitControls( camera, renderer.domElement );
+				controls.minDistance = 50;
+				controls.maxDistance = 200;
+
+				scene.add( new THREE.AmbientLight( 0x464646 ) );
+
+				var light = new THREE.DirectionalLight( 0xffddcc, 1 );
+				light.position.set( 1, 0.75, 0.5 );
+				scene.add( light );
+
+				var light = new THREE.DirectionalLight( 0xccccff, 1 );
+				light.position.set( - 1, 0.75, - 0.5 );
+				scene.add( light );
+
+				teapot = new THREE.TeapotBufferGeometry( 15, 18 );
+
+				mesh = new THREE.Mesh( teapot );
+				mesh.position.y = 15;
+				scene.add( mesh );
+
+				var planeGeo = new THREE.PlaneBufferGeometry( 100.1, 100.1 );
+
+				// reflector/mirror plane
+				var geometry = new THREE.PlaneBufferGeometry( 100, 100 );
+				var groundMirror = new THREE.ReflectorRTT( geometry, { clipBias: 0.003, textureWidth: WIDTH, textureHeight: HEIGHT } );
+
+				var mirror = new THREE.ReflectorNode( groundMirror );
+
+				let groundMirrorMaterial = new THREE.StandardNodeMaterial();
+				groundMirrorMaterial.environment = mirror; // or add "mirror" variable to disable blur
+				// groundMirrorMaterial.environment = new THREE.CubeTextureNode(cubemap);
+				var roughness = new THREE.FloatNode( 0.2 );
+				groundMirrorMaterial.roughness = roughness;
+
+				var mirrorMesh = new THREE.Mesh( planeGeo, groundMirrorMaterial );
+				// add all alternative mirror materials inside the ReflectorRTT to prevent:
+				// glDrawElements: Source and destination textures of the draw are the same.
+				groundMirror.add( mirrorMesh );
+				groundMirror.rotateX( - Math.PI / 2 );
+				scene.add( groundMirror );
+
+				window.addEventListener( 'resize', onWindowResize, false );
+
+				updateMaterial();
+
+				onWindowResize();
+				animate();
+
+			}
+
+			function clearGui() {
+
+				if ( gui ) gui.destroy();
+
+				gui = new dat.GUI();
+
+				var example = gui.add( param, 'example', {
+					'basic / standard': 'standard',
+				} ).onFinishChange( function () {
+
+					updateMaterial();
+
+				} );
+
+				gui.open();
+
+			}
+
+			function addGui( name, value, callback, isColor, min, max ) {
+
+				var node;
+
+				param[ name ] = value;
+
+				if ( isColor ) {
+
+					node = gui.addColor( param, name ).onChange( function () {
+
+						callback( param[ name ] );
+
+					} );
+
+				} else if ( typeof value == 'object' ) {
+
+					param[ name ] = value[ Object.keys( value )[ 0 ] ];
+
+					node = gui.add( param, name, value ).onChange( function () {
+
+						callback( param[ name ] );
+
+					} );
+
+				} else {
+
+					node = gui.add( param, name, min, max ).onChange( function () {
+
+						callback( param[ name ] );
+
+					} );
+
+				}
+
+				return node;
+
+			}
+
+			function updateMaterial() {
+
+				if ( mesh.material ) mesh.material.dispose();
+
+				if ( rtTexture ) {
+
+					rtTexture.dispose();
+					rtTexture = null;
+
+				}
+
+				if ( rtMaterial ) {
+
+					rtMaterial.dispose();
+					rtMaterial = null;
+
+				}
+
+				var name = param.example;
+				var mtl;
+
+				clearGui();
+
+				switch ( name ) {
+
+					case 'standard':
+
+						// MATERIAL
+
+						mtl = new THREE.StandardNodeMaterial();
+
+						//mtl.color = // albedo (vec3)
+						//mtl.alpha = // opacity (float)
+						//mtl.roughness = // roughness (float)
+						//mtl.metalness = // metalness (float)
+						//mtl.normal = // normal (vec3)
+						//mtl.emissive = // emissive color (vec3)
+						//mtl.ambient = // ambient color (vec3)
+						//mtl.shadow = // shadowmap (vec3)
+						//mtl.light = // custom-light (vec3)
+						//mtl.ao = // ambient occlusion (float)
+						//mtl.environment = // reflection/refraction (vec3)
+						//mtl.position = // vertex local position (vec3)
+
+						var mask = new THREE.SwitchNode( new THREE.TextureNode( getTexture( "decalDiffuse" ) ), 'w' );
+
+						var normalScale = new THREE.FloatNode( .3 );
+
+						var roughnessA = new THREE.FloatNode( .5 );
+						var metalnessA = new THREE.FloatNode( .5 );
+
+						var roughnessB = new THREE.FloatNode( 0 );
+						var metalnessB = new THREE.FloatNode( 1 );
+
+						var roughness = new THREE.Math3Node(
+							roughnessA,
+							roughnessB,
+							mask,
+							THREE.Math3Node.MIX
+						);
+
+						var metalness = new THREE.Math3Node(
+							metalnessA,
+							metalnessB,
+							mask,
+							THREE.Math3Node.MIX
+						);
+
+						var normalMask = new THREE.OperatorNode(
+							new THREE.Math1Node( mask, THREE.Math1Node.INVERT ),
+							normalScale,
+							THREE.OperatorNode.MUL
+						);
+
+						mtl.color = new THREE.ColorNode( 0xEEEEEE );
+						mtl.roughness = roughness;
+						mtl.metalness = metalness;
+						mtl.environment = new THREE.CubeTextureNode( cubemap );
+						mtl.normal = new THREE.NormalMapNode( new THREE.TextureNode( getTexture( "grassNormal" ) ) );
+						mtl.normal.scale = normalMask;
+
+						// GUI
+
+						addGui( 'color', mtl.color.value.getHex(), function ( val ) {
+
+							mtl.color.value.setHex( val );
+
+						}, true );
+
+						addGui( 'roughnessA', roughnessA.value, function ( val ) {
+
+							roughnessA.value = val;
+
+						}, false, 0, 1 );
+
+						addGui( 'metalnessA', metalnessA.value, function ( val ) {
+
+							metalnessA.value = val;
+
+						}, false, 0, 1 );
+
+						addGui( 'roughnessB', roughnessB.value, function ( val ) {
+
+							roughnessB.value = val;
+
+						}, false, 0, 1 );
+
+						addGui( 'metalnessB', metalnessB.value, function ( val ) {
+
+							metalnessB.value = val;
+
+						}, false, 0, 1 );
+
+						addGui( 'normalScale', normalScale.value, function ( val ) {
+
+							normalScale.value = val;
+
+						}, false, 0, 1 );
+
+						break;
+				}
+
+				// set material
+
+				mtl.side = THREE.DoubleSide;
+
+				mesh.material = mtl;
+
+			}
+
+			function onWindowResize() {
+
+				var width = window.innerWidth, height = window.innerHeight;
+
+				camera.aspect = width / height;
+				camera.updateProjectionMatrix();
+
+				renderer.setSize( width, height );
+
+				if ( rtTexture ) rtTexture.setSize( width, height );
+
+			}
+
+			function animate() {
+
+				var delta = clock.getDelta();
+
+				// update material animation and/or gpu calcs (pre-renderer)
+
+				frame.update( delta ).setRenderer( renderer );
+
+				if ( mesh.material instanceof THREE.NodeMaterial ) {
+
+					frame.updateNode( mesh.material );
+
+				}
+
+				// render to texture for sss/translucent material only
+
+				if ( rtTexture ) {
+
+					scene.overrideMaterial = rtMaterial;
+
+					renderer.render( scene, camera, rtTexture, true );
+
+					scene.overrideMaterial = null;
+
+				}
+
+				renderer.render( scene, camera );
+
+				requestAnimationFrame( animate );
+
+			}
+
+		</script>
+
+	</body>
+</html>
